@@ -13,7 +13,7 @@
 | **Student A (Role A)** | `Yair Zaidsher` | `206019747` | `Yair.Zaidsher@e.braude.ac.il` |
 | **Student B (Role B)** | `Dana Weiss` | `208103903` | `Dana.Weiss@e.braude.ac.il` |
 
-* **Group Number:** `G[XX]`
+* **Group Number:** `G[01]`
 * **GitHub Repository URL:** <https://github.com/YairZaid/Ex4_SmartParking_Design>
 * **Visual Paradigm Model:** [`SystemModel_Ex4.vpp`](SystemModel_Ex4.vpp)
 * **Domain Specification:** [`SYSTEM_STORY.md`](SYSTEM_STORY.md)
