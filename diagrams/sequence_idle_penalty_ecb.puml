@@ -1,0 +1,97 @@
+@startuml
+actor "EV Bay Sensor" as HW
+participant ":EvBaySensorBoundary" as Sensor <<boundary>>
+participant ":IdlePenaltyScheduler" as Timer <<system>>
+participant ":EvBillingControl" as Billing <<control>>
+participant "session : ChargingSession" as Session <<entity>>
+participant "fine : Violation" as Fine <<entity>>
+participant ":SmsGatewayBoundary" as SMS <<boundary>>
+
+== Minute 29 after 100% notification: driver unplugs cable, car stays in bay ==
+
+HW -> Sensor : cable disconnected
+activate Sensor
+Sensor -> Billing : handleCableUnplugged(sessionId)
+activate Billing
+Billing -> Session : markCableUnplugged()
+activate Session
+note right of Session
+  Edge Case B: isPluggedIn = false,
+  isPhysicallyOccupied stays true
+  (the car is still in the bay).
+end note
+deactivate Session
+deactivate Billing
+deactivate Sensor
+
+== Minute 30+: periodic idle-penalty check ==
+
+activate Timer
+Timer -> Billing : applyIdlePenalties()
+activate Billing
+
+loop for each completed ChargingSession
+  Billing -> Session : isIdleOver30Minutes()
+  activate Session
+  note right of Session
+    true iff isPhysicallyOccupied == true
+    AND now - completedAt > 30 min
+    (isPluggedIn is ignored)
+  end note
+  Session --> Billing : overdue
+  deactivate Session
+  alt overdue == true
+    Billing -> Session : calculateIdlePenalty(5.0)
+    activate Session
+    note right of Session
+      amount = 5 NIS x started idle hours
+      (counted from completedAt + 30 min);
+      stored in idlePenaltyNis.
+    end note
+    Session --> Billing : amount
+    deactivate Session
+    Billing -> Session : getIdleViolation()
+    activate Session
+    Session --> Billing : fine
+    deactivate Session
+    alt fine == null (first overdue check)
+      create Fine
+      Billing -> Fine : <<create>>("Charger Idle Penalty", amount)
+      activate Fine
+      Fine --> Billing : fine
+      deactivate Fine
+      Billing -> Session : attachIdleViolation(fine)
+      activate Session
+      deactivate Session
+      Billing -> SMS : sendSmsAlert(phoneNumber, "Idle penalty of 5 NIS/hr applied.")
+      activate SMS
+      deactivate SMS
+    else fine != null (later checks)
+      Billing -> Fine : updateFineAmount(amount)
+      activate Fine
+      deactivate Fine
+    end
+  end
+end
+
+deactivate Billing
+deactivate Timer
+
+== Driver physically vacates the bay: penalty stops ==
+
+HW -> Sensor : bay empty
+activate Sensor
+Sensor -> Billing : handleBayVacated(sessionId)
+activate Billing
+Billing -> Session : markBayVacated()
+activate Session
+note right of Session
+  isPhysicallyOccupied = false, so
+  isIdleOver30Minutes() now returns false.
+  The idle Violation stops growing; its
+  fineAmount is the final penalty.
+end note
+deactivate Session
+deactivate Billing
+deactivate Sensor
+@enduml

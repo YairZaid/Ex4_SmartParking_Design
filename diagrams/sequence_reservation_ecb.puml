@@ -1,0 +1,101 @@
+@startuml
+actor Student
+participant ":StudentDashboardUI" as UI <<boundary>>
+participant ":ReservationControl" as Ctrl <<control>>
+participant "spot : ParkingSpot" as Spot <<entity>>
+participant "res : Reservation" as Res <<entity>>
+participant "user : Student" as Usr <<entity>>
+participant ":LprGateBoundary" as LPR <<boundary>>
+participant ":NoShowScheduler" as Timer <<system>>
+
+Student -> UI : onReserveSpotClicked("EV-04")
+activate UI
+UI -> Ctrl : reserveSpot(userId, "EV-04", "12-345-67")
+activate Ctrl
+Ctrl -> Spot : getVersion()
+activate Spot
+Spot --> Ctrl : expectedVersion
+deactivate Spot
+Ctrl -> Spot : isAvailable()
+activate Spot
+Spot --> Ctrl : available
+deactivate Spot
+
+alt available == true
+  Ctrl -> Spot : tryReserve(expectedVersion)
+  activate Spot
+  note right of Spot
+    Atomic compare-and-set (Edge Case A):
+    succeeds only if status == AVAILABLE
+    AND version == expectedVersion; then sets
+    status = RESERVED and version++.
+    Of two same-millisecond requests for the
+    last spot, only the first commit succeeds.
+  end note
+  Spot --> Ctrl : acquired
+  deactivate Spot
+  alt acquired == true
+    create Res
+    Ctrl -> Res : <<create>>
+    activate Res
+    Res --> Ctrl : res
+    deactivate Res
+    Ctrl --> UI : true
+    UI -> UI : displayCountdown(15)
+  else acquired == false (Concurrent Race Condition)
+    Ctrl --> UI : false
+    UI -> UI : showErrorAlert("Spot just reserved by another user")
+  end
+else available == false
+  Ctrl --> UI : false
+  UI -> UI : showErrorAlert("Spot unavailable")
+end
+deactivate Ctrl
+deactivate UI
+
+== After Reservation: Arrival or No-Show ==
+
+alt Vehicle detected by LPR within 15 minutes
+  LPR -> Ctrl : processLprGateEntry("12-345-67")
+  activate Ctrl
+  Ctrl -> Res : isWithin15MinWindow()
+  activate Res
+  Res --> Ctrl : true
+  deactivate Res
+  Ctrl -> Res : setStatus(FULFILLED)
+  activate Res
+  deactivate Res
+  Ctrl -> Spot : setStatus(OCCUPIED)
+  activate Spot
+  deactivate Spot
+  Ctrl -> LPR : openBarrierGate()
+  activate LPR
+  deactivate LPR
+  Ctrl --> LPR : true
+  deactivate Ctrl
+else No vehicle detected within 15 minutes (No-Show)
+  activate Timer
+  Timer -> Ctrl : revokeExpiredReservations()
+  activate Ctrl
+  Ctrl -> Res : isWithin15MinWindow()
+  activate Res
+  Res --> Ctrl : false
+  deactivate Res
+  Ctrl -> Res : setStatus(NO_SHOW_REVOKED)
+  activate Res
+  deactivate Res
+  Ctrl -> Spot : setStatus(AVAILABLE)
+  activate Spot
+  note right of Spot
+    Releases the spot so it can be
+    reserved again (version++).
+  end note
+  deactivate Spot
+  Ctrl -> Usr : incrementNoShowWarnings()
+  activate Usr
+  deactivate Usr
+  destroy Res
+  deactivate Ctrl
+  deactivate Timer
+end
+@enduml
